@@ -23,6 +23,8 @@ const partVertex = /* glsl */ `
 const partFragment = /* glsl */ `
   uniform vec3 uInk;
   uniform vec3 uPaper;
+  uniform vec3 uTint;
+  uniform float uColor;
   uniform float uGhost;
   uniform float uHover;
   uniform float uPixelRatio;
@@ -75,8 +77,15 @@ const partFragment = /* glsl */ `
     h = max(h, hatch(fc, normalize(vec2(1.0, -1.0)), 5.0, 0.9) * smoothstep(0.8, 1.0, shade) * 0.25);
 
     vec3 paper = uPaper * (1.0 - 0.03 * shade);
-    paper = mix(paper, vec3(0.925, 0.925, 0.905), uHover * 0.7);
-    float ink = max(max(sulci, boundary), max(h * (1.0 - cut), gmInk));
+    // Colour mode: soft watercolour wash under the ink, darker in shadow;
+    // cortical cut faces show pinkish grey matter over pale white matter.
+    vec3 wash = mix(uTint, vec3(1.0), 0.18) * (1.0 - 0.22 * shade);
+    wash = mix(wash, mix(vec3(0.96, 0.95, 0.92), vec3(0.86, 0.72, 0.72), gm), cut);
+    paper = mix(paper, wash, uColor);
+    paper = mix(paper, paper * vec3(0.9, 0.9, 0.88), uHover * 0.7);
+    // Hatching and tertiary lines are lighter over colour.
+    h *= 1.0 - 0.5 * uColor;
+    float ink = max(max(sulci * (1.0 - 0.25 * uColor), boundary), max(h * (1.0 - cut), gmInk * (1.0 - 0.5 * uColor)));
     vec3 col = mix(paper, uInk, ink);
 
     // Ghost mode: only a thin silhouette and faint sulci remain.
@@ -95,6 +104,8 @@ export function partMaterial() {
     uniforms: {
       uInk: { value: new THREE.Color(0x111111) },
       uPaper: { value: new THREE.Color(0xffffff) },
+      uTint: { value: new THREE.Color(0xffffff) },
+      uColor: { value: 0 },
       uGhost: { value: 0 },
       uHover: { value: 0 },
       uPixelRatio: { value: 1 },

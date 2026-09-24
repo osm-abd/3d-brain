@@ -23,7 +23,8 @@ export const OVERVIEW = {
   sections: [
     ['How to use', [
       'Drag to rotate, scroll or pinch to zoom, right-drag (or two-finger drag) to pan.',
-      'Click any structure — on the model or in the list — to pull it out and read about it.',
+      'Click any structure — on the model or in the list — to highlight it and read about it; then move the slider (or press “Pop out”) to pull it out of the brain.',
+      'The small round button in the bottom-right corner (or the C key) switches between ink and colour.',
       'Use “Explode” to separate every part from the centre and reveal the internal layers.',
       'Cut faces of the cortical lobes show the ribbon of grey matter (hatched) over white matter.',
     ]],
@@ -675,4 +676,36 @@ export const STRUCTURES = {
       ]],
     ],
   },
+};
+
+// Fill colours used by colour mode (loosely following classic atlas conventions:
+// cool lobes, warm limbic structures, blue CSF spaces, tan brainstem).
+export const COLORS = {
+  frontal: '#6f9fd8',
+  parietal: '#e9c46a',
+  temporal: '#74c69d',
+  occipital: '#e5898f',
+  insula: '#b48ad6',
+  cingulate: '#f4a261',
+  corpus_callosum: '#e3d7b8',
+  caudate: '#4fb3b0',
+  putamen: '#3e9aa6',
+  globus_pallidus: '#9fd6cf',
+  thalamus: '#9a7fd1',
+  hypothalamus: '#d487b8',
+  pituitary: '#c9679d',
+  pineal: '#e7b3d2',
+  hippocampus: '#e07a5f',
+  amygdala: '#c8553d',
+  fornix: '#f2c89b',
+  lateral_ventricle: '#7ec8e3',
+  third_ventricle: '#5aa9d6',
+  fourth_ventricle: '#3d85c6',
+  midbrain: '#c2a47e',
+  pons: '#ad8d6c',
+  medulla: '#957a5d',
+  cerebellar_hemisphere: '#b7c96a',
+  vermis: '#93ad4a',
+  olfactory: '#f6d365',
+  optic: '#ffc857',
 };
