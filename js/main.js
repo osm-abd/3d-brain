@@ -155,6 +155,23 @@ function createInstance(id, geometry, side) {
     if (d < best) { best = d; anchor.set(p.getX(i), p.getY(i), p.getZ(i)); }
   }
 
+  // Candidate label points: the anchor plus the vertices nearest each octant
+  // centre of the bounding box, so a partly hidden part can still be labelled.
+  const samples = [anchor.clone()];
+  for (let o = 0; o < 8; o++) {
+    const oc = new THREE.Vector3(
+      center.x + size.x * ((o & 1) ? 0.25 : -0.25),
+      center.y + size.y * ((o & 2) ? 0.25 : -0.25),
+      center.z + size.z * ((o & 4) ? 0.25 : -0.25));
+    let bestD = Infinity; const v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i += 5) {
+      const dx = p.getX(i) - oc.x, dy = p.getY(i) - oc.y, dz = p.getZ(i) - oc.z;
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bestD) { bestD = d; v.set(p.getX(i), p.getY(i), p.getZ(i)); }
+    }
+    if (samples.every((q) => q.distanceToSquared(v) > 0.04)) samples.push(v);
+  }
+
   const s = side === 'left' ? -1 : 1;
   const explode = new THREE.Vector3();
   if (CORTEX.has(id)) {
@@ -180,8 +197,8 @@ function createInstance(id, geometry, side) {
   popout.setLength(Math.max(popout.length(), 3.5)).add(pull.clone().multiplyScalar(1.2));
 
   const inst = {
-    key: side ? `${id}:${side}` : id, id, side, info, mesh, hull, group, center, size, anchor, explode, pull, popout,
-    offset: new THREE.Vector3(), ghost: 0, hover: 0, visible: true, label: null,
+    key: side ? `${id}:${side}` : id, id, side, info, mesh, hull, group, center, size, anchor, samples, labelAt: anchor.clone(), explode, pull, popout,
+    offset: new THREE.Vector3(), inView: false, ghost: 0, hover: 0, visible: true, label: null,
   };
   mesh.userData.inst = inst;
   parts.push(inst);
@@ -545,8 +562,34 @@ function overlaps(x, y, w, h) {
   for (const r of placed) if (x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) return true;
   return false;
 }
+// Occlusion test for labels: a label is shown only if the first opaque
+// surface on the ray from the camera to its anchor belongs to that structure.
+// A few parts are re-tested each frame so the cost stays small.
+const occRay = new THREE.Raycaster();
+const occDir = new THREE.Vector3();
+let occCursor = 0;
+function updateOcclusion(budget = 4) {
+  if (!labelOrder.length) return;
+  const blockers = parts.filter((q) => q.visible && q.ghost < 0.5).map((q) => q.mesh);
+  for (let n = 0; n < budget; n++) {
+    const p = labelOrder[occCursor++ % labelOrder.length];
+    p.inView = false;
+    if (!p.visible) continue;
+    for (const sample of p.samples) {
+      const pt = tmp.copy(sample).add(p.offset);
+      occDir.subVectors(pt, camera.position);
+      const dist = occDir.length();
+      occRay.set(camera.position, occDir.divideScalar(dist));
+      occRay.far = dist + 0.05;
+      const hit = occRay.intersectObjects(blockers, false)[0];
+      if (!hit || hit.object === p.mesh) { p.inView = true; p.labelAt.copy(sample); break; }
+    }
+  }
+}
+
 function updateLabels() {
   placed.length = 0;
+  updateOcclusion();
   const w = resolution.x / pixelRatio(), h = resolution.y / pixelRatio();
   const showAll = state.labels && state.explode > 0.55;
   for (const p of labelOrder) {
@@ -561,8 +604,10 @@ function updateLabels() {
         if (dp > dq) show = false;
       }
     }
+    // Hide labels of structures hidden behind others (seen from this angle).
+    if (show && !p.inView) show = false;
     if (!show) { if (p.label.style.opacity !== '0') p.label.style.opacity = '0'; continue; }
-    tmp.copy(p.anchor).add(p.offset).project(camera);
+    tmp.copy(p.labelAt).add(p.offset).project(camera);
     if (tmp.z > 1) { p.label.style.opacity = '0'; continue; }
     const x = (tmp.x * 0.5 + 0.5) * w, y = (-tmp.y * 0.5 + 0.5) * h;
     if (!p.labelW) p.labelW = p.label.offsetWidth + 6;
