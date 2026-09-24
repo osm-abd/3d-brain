@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Encephalon — 3D Brain Atlas</title>
+  <meta name="description" content="An interactive, line-art 3D atlas of human brain anatomy. Rotate the brain, pull out individual structures and explode it to see the internal layers." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="scene" aria-label="Interactive 3D model of the human brain"></canvas>
+  <div id="labels" aria-hidden="true"></div>
+  <div id="tooltip" role="status" aria-live="polite"></div>
+
+  <header class="masthead">
+    <p class="eyebrow">Plate I · Encephalon</p>
+    <h1>The Human Brain</h1>
+    <p class="subtitle">An interactive atlas of its anatomy</p>
+  </header>
+
+  <button id="index-toggle" class="chip-btn index-toggle" aria-expanded="false" aria-controls="index">Structures</button>
+
+  <nav id="index" class="panel index" aria-label="Brain structures">
+    <div class="index-head">
+      <input id="search" type="search" placeholder="Search structures…" autocomplete="off" spellcheck="false" />
+    </div>
+    <div id="index-list" class="index-list"></div>
+  </nav>
+
+  <aside id="info" class="panel info" aria-live="polite"></aside>
+
+  <div class="toolbar" role="toolbar" aria-label="View controls">
+    <button id="explode-btn" class="tool primary" aria-pressed="false" title="Expand every part outward from the centre (E)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M5.6 18.4l3.2-3.2M15.2 8.8l3.2-3.2"/><circle cx="12" cy="12" r="2.2"/></svg>
+      <span>Explode</span>
+    </button>
+    <label class="slider" title="Explosion amount">
+      <span class="sr-only">Explosion amount</span>
+      <input id="explode-range" type="range" min="0" max="1" step="0.01" value="0" />
+    </label>
+    <span class="divider"></span>
+    <div class="views" role="group" aria-label="Standard views">
+      <button class="tool" data-view="left" title="Left lateral view">L</button>
+      <button class="tool" data-view="right" title="Right lateral view">R</button>
+      <button class="tool" data-view="front" title="Anterior view">A</button>
+      <button class="tool" data-view="back" title="Posterior view">P</button>
+      <button class="tool" data-view="top" title="Superior view">S</button>
+      <button class="tool" data-view="bottom" title="Inferior view">I</button>
+    </div>
+    <span class="divider"></span>
+    <button id="half-btn" class="tool" aria-pressed="false" title="Hide the left half to see the medial surface (H)">½</button>
+    <button id="labels-btn" class="tool" aria-pressed="true" title="Show labels when exploded">Aa</button>
+    <button id="reset-btn" class="tool" title="Reset view (R)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/></svg>
+    </button>
+  </div>
+
+  <svg id="compass" viewBox="-50 -50 100 100" aria-hidden="true"></svg>
+
+  <div id="loader" class="loader">
+    <div class="loader-inner">
+      <svg viewBox="0 0 120 80" class="loader-mark" aria-hidden="true">
+        <path d="M60 12c-14-8-36-4-44 12-7 14-2 28 8 34 9 6 20 6 28 2 4 8 14 10 20 6M60 12c14-8 36-4 44 12 7 14 2 28-8 34-9 6-20 6-28 2M60 12v46"/>
+      </svg>
+      <p id="loader-text">Preparing specimen…</p>
+    </div>
+  </div>
+
+  <noscript><p class="noscript">This atlas needs JavaScript and WebGL.</p></noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
