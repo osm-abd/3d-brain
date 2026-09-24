@@ -1,11 +1,10 @@
 # Encephalon — an interactive 3D brain atlas
 
-A browser-based atlas of human brain anatomy, drawn as black ink line-art on white.
+A browser-based atlas of human brain anatomy, drawn as ink line-art over soft atlas colours on a white background. Each structure has its own colour, and the index shows matching swatches.
 
 - **Rotate, zoom and pan** the model (drag / scroll / right-drag, or touch gestures).
 - **Click any structure** (on the model or in the index) to select it. The rest of the brain fades to a faint outline, the camera moves to it, and the panel shows its anatomy, functions, clinical notes and blood supply. While it is selected, the slider (or the **Pop out** button) slides it out of the brain like a Lego brick; paired structures come out on both sides together.
 - **Explode** (button, slider or <kbd>E</kbd>) pushes every part outward from the centre so you can see the internal layers: cortex → insula and cingulate → corpus callosum and ventricles → basal ganglia and thalamus → brainstem and cerebellum. Cut faces of the cortical lobes show the grey-matter ribbon (hatched) over white matter.
-- The small round button in the bottom-right corner (<kbd>C</kbd>) switches to **colour mode**, giving each structure an atlas colour; the index shows matching swatches.
 - **½** (<kbd>H</kbd>) hides the left half to show the medial surface. You can hide individual structures from the index, or **Isolate** one.
 - Standard views: L / R lateral, A anterior, P posterior, S superior, I inferior. <kbd>Esc</kbd> deselects and <kbd>R</kbd> resets.
 

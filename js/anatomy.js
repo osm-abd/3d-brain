@@ -24,7 +24,6 @@ export const OVERVIEW = {
     ['How to use', [
       'Drag to rotate, scroll or pinch to zoom, right-drag (or two-finger drag) to pan.',
       'Click any structure — on the model or in the list — to highlight it and read about it; then move the slider (or press “Pop out”) to pull it out of the brain.',
-      'The small round button in the bottom-right corner (or the C key) switches between ink and colour.',
       'Use “Explode” to separate every part from the centre and reveal the internal layers.',
       'Cut faces of the cortical lobes show the ribbon of grey matter (hatched) over white matter.',
     ]],
@@ -678,7 +677,7 @@ export const STRUCTURES = {
   },
 };
 
-// Fill colours used by colour mode (loosely following classic atlas conventions:
+// Fill colour of each structure (loosely following classic atlas conventions:
 // cool lobes, warm limbic structures, blue CSF spaces, tan brainstem).
 export const COLORS = {
   frontal: '#6f9fd8',

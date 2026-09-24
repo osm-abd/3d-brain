@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { COLORS, GROUPS, OVERVIEW, STRUCTURES } from './anatomy.js';
-import { partMaterial, hullMaterial } from './materials.js';
+import { partMaterial, hullMaterial, idMaterial } from './materials.js';
 
 // ---------------------------------------------------------------------------
 // Scene setup
@@ -197,7 +197,7 @@ function createInstance(id, geometry, side) {
   popout.setLength(Math.max(popout.length(), 3.5)).add(pull.clone().multiplyScalar(1.2));
 
   const inst = {
-    key: side ? `${id}:${side}` : id, id, side, info, mesh, hull, group, center, size, anchor, samples, labelAt: anchor.clone(), explode, pull, popout,
+    key: side ? `${id}:${side}` : id, id, side, info, mesh, hull, group, center, size, anchor, samples, labelAt: anchor.clone(), idMat: idMaterial(parts.length), explode, pull, popout,
     offset: new THREE.Vector3(), inView: false, ghost: 0, hover: 0, visible: true, label: null,
   };
   mesh.userData.inst = inst;
@@ -215,8 +215,6 @@ const state = {
   explode: 0,
   explodeTarget: 0,
   selected: null,   // structure id; both members of a pair are selected together
-  colorful: false,
-  color: 0,         // animated 0..1 blend toward colour mode
   hovered: null,
   labels: true,
   half: false,
@@ -502,13 +500,6 @@ function toggleHalf() {
   }
 }
 halfBtn.addEventListener('click', toggleHalf);
-const colorBtn = $('#color-btn');
-function toggleColor() {
-  state.colorful = !state.colorful;
-  colorBtn.setAttribute('aria-pressed', String(state.colorful));
-  document.body.classList.toggle('colorful', state.colorful);
-}
-colorBtn.addEventListener('click', toggleColor);
 const labelsBtn = $('#labels-btn');
 labelsBtn.addEventListener('click', () => {
   state.labels = !state.labels;
@@ -536,7 +527,6 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') select(null);
   else if (e.key === 'e' || e.key === 'E') setExplode(state.explodeTarget > 0.5 ? 0 : 1);
   else if (e.key === 'h' || e.key === 'H') toggleHalf();
-  else if (e.key === 'c' || e.key === 'C') toggleColor();
   else if (e.key === 'r' || e.key === 'R') resetAll();
 });
 
@@ -562,36 +552,54 @@ function overlaps(x, y, w, h) {
   for (const r of placed) if (x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) return true;
   return false;
 }
-// Occlusion test for labels: a label is shown only if the first opaque
-// surface on the ray from the camera to its anchor belongs to that structure.
-// A few parts are re-tested each frame so the cost stays small.
-const occRay = new THREE.Raycaster();
-const occDir = new THREE.Vector3();
-let occCursor = 0;
-function updateOcclusion(budget = 4) {
-  if (!labelOrder.length) return;
-  const blockers = parts.filter((q) => q.visible && q.ghost < 0.5).map((q) => q.mesh);
-  for (let n = 0; n < budget; n++) {
-    const p = labelOrder[occCursor++ % labelOrder.length];
-    p.inView = false;
-    if (!p.visible) continue;
-    for (const sample of p.samples) {
-      const pt = tmp.copy(sample).add(p.offset);
-      occDir.subVectors(pt, camera.position);
-      const dist = occDir.length();
-      occRay.set(camera.position, occDir.divideScalar(dist));
-      occRay.far = dist + 0.05;
-      const hit = occRay.intersectObjects(blockers, false)[0];
-      if (!hit || hit.object === p.mesh) { p.inView = true; p.labelAt.copy(sample); break; }
-    }
+// Label visibility: every so often (only while labels are on screen) the
+// scene is rendered at low resolution with a flat ID colour per part. A label
+// is shown only if one of its sample points lands on a pixel of its own part,
+// and it is placed on that point.
+const idTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: true });
+let idPixels = new Uint8Array(4);
+let lastIdPass = -Infinity;
+const idProj = new THREE.Vector3();
+function updateVisibility(now) {
+  if (now - lastIdPass < 150) return;
+  lastIdPass = now;
+  const w = Math.max(64, Math.round(resolution.x / pixelRatio() / 4));
+  const h = Math.max(64, Math.round(resolution.y / pixelRatio() / 4));
+  if (idTarget.width !== w || idTarget.height !== h) { idTarget.setSize(w, h); idPixels = new Uint8Array(w * h * 4); }
+
+  const saved = parts.map((p) => [p.mesh.material, p.mesh.visible, p.hull.visible]);
+  for (const p of parts) {
+    p.mesh.material = p.idMat;
+    p.mesh.visible = p.ghost < 0.5; // ghosted parts are see-through
+    p.hull.visible = false;
   }
+  renderer.setClearColor(0x000000, 1);
+  renderer.setRenderTarget(idTarget);
+  renderer.render(scene, camera);
+  renderer.readRenderTargetPixels(idTarget, 0, 0, w, h, idPixels);
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(0xffffff, 1);
+  parts.forEach((p, i) => { [p.mesh.material, p.mesh.visible, p.hull.visible] = saved[i]; });
+
+  parts.forEach((p, i) => {
+    p.inView = false;
+    if (!p.visible) return;
+    for (const sample of p.samples) {
+      idProj.copy(sample).add(p.offset).project(camera);
+      if (idProj.z > 1) continue;
+      const x = Math.floor((idProj.x * 0.5 + 0.5) * w), y = Math.floor((idProj.y * 0.5 + 0.5) * h);
+      if (x < 0 || y < 0 || x >= w || y >= h) continue;
+      const o = (y * w + x) * 4;
+      if (idPixels[o] + idPixels[o + 1] * 256 === i + 1) { p.inView = true; p.labelAt.copy(sample); break; }
+    }
+  });
 }
 
-function updateLabels() {
+function updateLabels(now) {
   placed.length = 0;
-  updateOcclusion();
   const w = resolution.x / pixelRatio(), h = resolution.y / pixelRatio();
   const showAll = state.labels && state.explode > 0.55;
+  if (state.labels && (showAll || state.selected)) updateVisibility(now);
   for (const p of labelOrder) {
     const isSel = state.selected === p.id;
     let show = p.visible && state.labels && (isSel || (showAll && !state.selected));
@@ -682,8 +690,6 @@ function frame() {
   if (state.instant) { k = 1; if (fly) fly.t = 1; }
 
   state.explode += (state.explodeTarget - state.explode) * k;
-  state.color += ((state.colorful ? 1 : 0) - state.color) * k;
-  if (Math.abs(state.color - (state.colorful ? 1 : 0)) < 0.002) state.color = state.colorful ? 1 : 0;
 
   if (fly) {
     fly.t += dt / fly.duration;
@@ -710,7 +716,6 @@ function frame() {
     const u = p.mesh.material.uniforms;
     u.uGhost.value = p.ghost;
     u.uHover.value = p.hover;
-    u.uColor.value = state.color;
     u.uPixelRatio.value = pixelRatio();
     const transparent = p.ghost > 0.001;
     if (p.mesh.material.transparent !== transparent) {
@@ -724,7 +729,7 @@ function frame() {
   }
 
   renderer.render(scene, camera);
-  updateLabels();
+  updateLabels(performance.now());
   if (++compassTick % 2 === 0) updateCompass();
   requestAnimationFrame(frame);
 }
@@ -758,7 +763,7 @@ async function boot() {
     if (window.innerWidth <= 900) infoPanel.classList.add('collapsed');
     requestAnimationFrame(frame);
     $('#loader').classList.add('done');
-    window.__atlas = { state, parts, select, setExplode, setView, camera, controls, toggleHalf, toggleColor };
+    window.__atlas = { state, parts, select, setExplode, setView, camera, controls, toggleHalf };
   } catch (err) {
     console.error(err);
     loaderText.textContent = 'Sorry — this atlas needs a browser with WebGL. (' + err.message + ')';
