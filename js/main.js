@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
-import { GROUPS, OVERVIEW, STRUCTURES } from './anatomy.js';
+import { COLORS, GROUPS, OVERVIEW, STRUCTURES } from './anatomy.js';
 import { partMaterial, hullMaterial } from './materials.js';
 
 // ---------------------------------------------------------------------------
@@ -134,6 +134,7 @@ const pickables = [];
 function createInstance(id, geometry, side) {
   const info = STRUCTURES[id];
   const material = partMaterial();
+  material.uniforms.uTint.value.setStyle(COLORS[id] || '#dddddd', THREE.LinearSRGBColorSpace); // shader outputs sRGB directly
   const mesh = new THREE.Mesh(geometry, material);
   const hull = new THREE.Mesh(geometry, hullMaterial());
   hull.raycast = () => {};
@@ -154,6 +155,23 @@ function createInstance(id, geometry, side) {
     if (d < best) { best = d; anchor.set(p.getX(i), p.getY(i), p.getZ(i)); }
   }
 
+  // Candidate label points: the anchor plus the vertices nearest each octant
+  // centre of the bounding box, so a partly hidden part can still be labelled.
+  const samples = [anchor.clone()];
+  for (let o = 0; o < 8; o++) {
+    const oc = new THREE.Vector3(
+      center.x + size.x * ((o & 1) ? 0.25 : -0.25),
+      center.y + size.y * ((o & 2) ? 0.25 : -0.25),
+      center.z + size.z * ((o & 4) ? 0.25 : -0.25));
+    let bestD = Infinity; const v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i += 5) {
+      const dx = p.getX(i) - oc.x, dy = p.getY(i) - oc.y, dz = p.getZ(i) - oc.z;
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bestD) { bestD = d; v.set(p.getX(i), p.getY(i), p.getZ(i)); }
+    }
+    if (samples.every((q) => q.distanceToSquared(v) > 0.04)) samples.push(v);
+  }
+
   const s = side === 'left' ? -1 : 1;
   const explode = new THREE.Vector3();
   if (CORTEX.has(id)) {
@@ -172,9 +190,15 @@ function createInstance(id, geometry, side) {
   if (pull.lengthSq() < 1e-6) pull.set(0, 1, 0);
   pull.normalize().multiplyScalar(CORTEX.has(id) || id === 'cerebellar_hemisphere' ? 2.8 : 2.0);
 
+  // Where the structure travels when it is popped out on its own: far enough
+  // to clear the brain even for deep nuclei.
+  const popout = explode.clone();
+  if (popout.lengthSq() < 1e-6) popout.set(0, 1, 0);
+  popout.setLength(Math.max(popout.length(), 3.5)).add(pull.clone().multiplyScalar(1.2));
+
   const inst = {
-    key: side ? `${id}:${side}` : id, id, side, info, mesh, hull, group, center, size, anchor, explode, pull,
-    offset: new THREE.Vector3(), ghost: 0, hover: 0, visible: true, label: null,
+    key: side ? `${id}:${side}` : id, id, side, info, mesh, hull, group, center, size, anchor, samples, labelAt: anchor.clone(), explode, pull, popout,
+    offset: new THREE.Vector3(), inView: false, ghost: 0, hover: 0, visible: true, label: null,
   };
   mesh.userData.inst = inst;
   parts.push(inst);
@@ -190,8 +214,9 @@ function createInstance(id, geometry, side) {
 const state = {
   explode: 0,
   explodeTarget: 0,
-  selected: null,   // structure id (both sides highlighted) ...
-  selectedSide: null, // ... and the side that was clicked (pulled out)
+  selected: null,   // structure id; both members of a pair are selected together
+  colorful: false,
+  color: 0,         // animated 0..1 blend toward colour mode
   hovered: null,
   labels: true,
   half: false,
@@ -226,9 +251,9 @@ function buildIndex() {
       const row = document.createElement('div');
       row.className = 'item';
       row.dataset.id = id;
-      row.innerHTML = `<button class="item-name" type="button"><span class="num">${String(n).padStart(2, '0')}</span><span class="label">${STRUCTURES[id].name}</span></button>` +
+      row.innerHTML = `<button class="item-name" type="button"><span class="num">${String(n).padStart(2, '0')}</span><span class="swatch" style="background:${COLORS[id] || '#ddd'}"></span><span class="label">${STRUCTURES[id].name}</span></button>` +
         `<button class="eye" type="button" aria-label="Hide ${STRUCTURES[id].name}" title="Show / hide">${EYE}</button>`;
-      row.querySelector('.item-name').addEventListener('click', () => select(state.selected === id ? null : id, state.selectedSide));
+      row.querySelector('.item-name').addEventListener('click', () => select(state.selected === id ? null : id));
       row.querySelector('.item-name').addEventListener('mouseenter', () => setHover(id));
       row.querySelector('.item-name').addEventListener('mouseleave', () => setHover(null));
       row.querySelector('.eye').addEventListener('click', () => toggleHidden(id));
@@ -287,7 +312,7 @@ function renderInfo() {
   }
   const s = STRUCTURES[id];
   const group = GROUPS.find((g) => g.id === s.group);
-  const sideText = s.bilateral ? (state.selectedSide === 'left' ? 'Left · paired' : 'Right · paired') : 'Midline · unpaired';
+  const sideText = s.bilateral ? 'Left & right · paired' : 'Midline · unpaired';
   infoPanel.innerHTML = `<div class="kicker"><span>${String(s.number).padStart(2, '0')} · ${group.name}</span><span>${sideText}</span></div>
     <h2>${s.name}</h2><p class="latin">${esc(s.latin)}</p>
     <div class="actions"><button class="chip-btn" data-act="back" type="button">← Overview</button>
@@ -315,12 +340,13 @@ function isolate(id) {
 // ---------------------------------------------------------------------------
 // Selection / hover
 // ---------------------------------------------------------------------------
-function select(id, side = null) {
-  if (id && STRUCTURES[id] && !STRUCTURES[id].bilateral) side = null;
-  if (id && STRUCTURES[id]?.bilateral && !side) side = camera.position.x < controls.target.x ? 'left' : 'right';
-  if (id && state.half && side === 'left') side = 'right';
+// Selecting only highlights a structure; it pops out when the explode
+// slider (or the "Pop out" button) is used while it is selected.
+function select(id) {
+  if (id !== state.selected) setExplode(0, true, false);
   state.selected = id;
-  state.selectedSide = side;
+  explodeLabel.textContent = id ? 'Pop out' : 'Explode';
+  explodeBtn.title = id ? 'Pop the selected structure out of the brain (E)' : 'Expand every part outward from the centre (E)';
   for (const [k, el] of itemEls) el.classList.toggle('active', k === id);
   if (id) {
     const row = itemEls.get(id);
@@ -338,11 +364,6 @@ function setHover(id, side = null) {
   for (const [k, el] of itemEls) el.classList.toggle('hover', k === id);
 }
 
-function selectedInstance() {
-  const list = partsById.get(state.selected) || [];
-  return list.find((p) => p.side === state.selectedSide) || list[0];
-}
-
 // ---------------------------------------------------------------------------
 // Camera animation
 // ---------------------------------------------------------------------------
@@ -350,20 +371,24 @@ let fly = null;
 function flyTo(pos, target, duration = 0.9) {
   fly = { t: 0, duration, fromPos: camera.position.clone(), toPos: pos ? pos.clone() : null, fromTarget: controls.target.clone(), toTarget: target.clone() };
 }
-function partWorldCenter(inst, withPull = true) {
-  const off = targetOffset(inst, withPull);
+function partWorldCenter(inst) {
+  const off = targetOffset(inst);
   return inst.center.clone().add(off);
 }
 function focusOn(id) {
-  const inst = (partsById.get(id) || []).find((p) => p.side === state.selectedSide) || partsById.get(id)?.[0];
-  if (!inst) return;
-  const target = partWorldCenter(inst);
-  const radius = Math.max(inst.size.length() * 0.5, 1.2);
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  // Look at the part from the side it was pulled toward, blended with the current view.
-  const pullDir = inst.pull.clone().normalize();
-  dir.lerp(pullDir, 0.45).normalize();
-  const dist = (THREE.MathUtils.clamp(radius * 5.5, 20, 50) + state.explodeTarget * 10) * fitScale();
+  const list = (partsById.get(id) || []).filter((p) => p.visible);
+  if (!list.length) return;
+  // Frame every visible member of the structure (both sides of a pair).
+  const box = new THREE.Box3();
+  for (const p of list) {
+    const c = partWorldCenter(p);
+    box.expandByPoint(c.clone().addScaledVector(p.size, 0.5)).expandByPoint(c.clone().addScaledVector(p.size, -0.5));
+  }
+  const target = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 1.2);
+  const dir = (fly && fly.toPos ? fly.toPos.clone().sub(fly.toTarget) : camera.position.clone().sub(controls.target)).normalize();
+  if (list.length === 1) dir.lerp(list[0].pull.clone().normalize(), 0.45).normalize();
+  const dist = THREE.MathUtils.clamp(radius * 4.2, 20, 70) * fitScale();
   flyTo(target.clone().add(dir.multiplyScalar(dist)), target);
 }
 
@@ -411,8 +436,8 @@ window.addEventListener('pointerup', (e) => {
   if (!wasCanvas || moved > 6) return;
   const inst = pick(e.clientX, e.clientY);
   if (!inst) { if (state.selected) select(null); return; }
-  if (state.selected === inst.id && state.selectedSide === inst.side) select(null);
-  else select(inst.id, inst.side);
+  if (state.selected === inst.id) select(null);
+  else select(inst.id);
 });
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'mouse') return;
@@ -437,12 +462,14 @@ canvas.addEventListener('pointerleave', () => { tooltip.classList.remove('show')
 // ---------------------------------------------------------------------------
 const explodeBtn = $('#explode-btn');
 const explodeRange = $('#explode-range');
-function setExplode(v, animate = true) {
+const explodeLabel = explodeBtn.querySelector('span');
+function setExplode(v, animate = true, reframe = true) {
   state.explodeTarget = v;
   if (!animate) state.explode = v;
   explodeBtn.setAttribute('aria-pressed', String(v > 0.5));
   explodeRange.value = v;
-  if (state.selected) setTimeout(() => focusOn(state.selected), 0);
+  if (!reframe) return;
+  if (state.selected) focusOn(state.selected);
   else zoomForExplode(v);
 }
 // Pull the camera back far enough to frame the exploded (or assembled) brain.
@@ -458,7 +485,10 @@ explodeRange.addEventListener('input', () => {
   state.explode = state.explodeTarget;
   explodeBtn.setAttribute('aria-pressed', String(state.explodeTarget > 0.5));
 });
-explodeRange.addEventListener('change', () => { if (!state.selected) zoomForExplode(state.explodeTarget); });
+explodeRange.addEventListener('change', () => {
+  if (state.selected) focusOn(state.selected);
+  else zoomForExplode(state.explodeTarget);
+});
 for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => setView(b.dataset.view));
 $('#reset-btn').addEventListener('click', resetAll);
 const halfBtn = $('#half-btn');
@@ -466,13 +496,19 @@ function toggleHalf() {
   state.half = !state.half;
   halfBtn.setAttribute('aria-pressed', String(state.half));
   applyVisibility();
-  if (state.half && state.selectedSide === 'left') select(state.selected, 'right');
   if (state.half && !state.selected) {
     const d = HOME.pos.distanceTo(HOME.target) * (1 + state.explodeTarget * 0.6) * fitScale();
     flyTo(HOME.target.clone().add(new THREE.Vector3(-1, 0.05, 0).multiplyScalar(d)), HOME.target);
   }
 }
 halfBtn.addEventListener('click', toggleHalf);
+const colorBtn = $('#color-btn');
+function toggleColor() {
+  state.colorful = !state.colorful;
+  colorBtn.setAttribute('aria-pressed', String(state.colorful));
+  document.body.classList.toggle('colorful', state.colorful);
+}
+colorBtn.addEventListener('click', toggleColor);
 const labelsBtn = $('#labels-btn');
 labelsBtn.addEventListener('click', () => {
   state.labels = !state.labels;
@@ -500,6 +536,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') select(null);
   else if (e.key === 'e' || e.key === 'E') setExplode(state.explodeTarget > 0.5 ? 0 : 1);
   else if (e.key === 'h' || e.key === 'H') toggleHalf();
+  else if (e.key === 'c' || e.key === 'C') toggleColor();
   else if (e.key === 'r' || e.key === 'R') resetAll();
 });
 
@@ -525,13 +562,40 @@ function overlaps(x, y, w, h) {
   for (const r of placed) if (x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) return true;
   return false;
 }
+// Occlusion test for labels: a label is shown only if the first opaque
+// surface on the ray from the camera to its anchor belongs to that structure.
+// A few parts are re-tested each frame so the cost stays small.
+const occRay = new THREE.Raycaster();
+const occDir = new THREE.Vector3();
+let occCursor = 0;
+function updateOcclusion(budget = 4) {
+  if (!labelOrder.length) return;
+  const blockers = parts.filter((q) => q.visible && q.ghost < 0.5).map((q) => q.mesh);
+  for (let n = 0; n < budget; n++) {
+    const p = labelOrder[occCursor++ % labelOrder.length];
+    p.inView = false;
+    if (!p.visible) continue;
+    for (const sample of p.samples) {
+      const pt = tmp.copy(sample).add(p.offset);
+      occDir.subVectors(pt, camera.position);
+      const dist = occDir.length();
+      occRay.set(camera.position, occDir.divideScalar(dist));
+      occRay.far = dist + 0.05;
+      const hit = occRay.intersectObjects(blockers, false)[0];
+      if (!hit || hit.object === p.mesh) { p.inView = true; p.labelAt.copy(sample); break; }
+    }
+  }
+}
+
 function updateLabels() {
   placed.length = 0;
+  updateOcclusion();
   const w = resolution.x / pixelRatio(), h = resolution.y / pixelRatio();
   const showAll = state.labels && state.explode > 0.55;
   for (const p of labelOrder) {
-    let show = p.visible && (showAll || (state.labels && state.selected === p.id && p.side === state.selectedSide && !showAll));
-    if (show && showAll && p.side && !state.half) {
+    const isSel = state.selected === p.id;
+    let show = p.visible && state.labels && (isSel || (showAll && !state.selected));
+    if (show && !isSel && p.side && !state.half) {
       // Only label the member of a pair that faces the camera.
       const twin = partsById.get(p.id).find((q) => q !== p);
       if (twin && twin.visible) {
@@ -540,13 +604,13 @@ function updateLabels() {
         if (dp > dq) show = false;
       }
     }
-    if (show && state.selected && state.selected !== p.id) show = false;
+    // Hide labels of structures hidden behind others (seen from this angle).
+    if (show && !p.inView) show = false;
     if (!show) { if (p.label.style.opacity !== '0') p.label.style.opacity = '0'; continue; }
-    tmp.copy(p.anchor).add(p.offset).project(camera);
+    tmp.copy(p.labelAt).add(p.offset).project(camera);
     if (tmp.z > 1) { p.label.style.opacity = '0'; continue; }
     const x = (tmp.x * 0.5 + 0.5) * w, y = (-tmp.y * 0.5 + 0.5) * h;
     if (!p.labelW) p.labelW = p.label.offsetWidth + 6;
-    const isSel = state.selected === p.id;
     if (!isSel && overlaps(x - 4, y - 16, p.labelW, 17)) { p.label.style.opacity = '0'; continue; }
     placed.push({ x: x - 4, y: y - 16, w: p.labelW, h: 17 });
     p.label.style.transform = `translate(${x.toFixed(1)}px, ${(y - 8).toFixed(1)}px)`;
@@ -585,10 +649,15 @@ function updateCompass() {
 // ---------------------------------------------------------------------------
 // Frame loop
 // ---------------------------------------------------------------------------
-function targetOffset(p, withPull = true) {
-  const off = p.explode.clone().multiplyScalar(state.explodeTarget);
-  if (withPull && state.selected === p.id && (!p.side || p.side === state.selectedSide)) off.add(p.pull);
-  return off;
+// With nothing selected the slider explodes every part. With a selection it
+// pops out only the selected structure (both sides of a pair); the rest stay put.
+function offsetFor(p, amount, out = new THREE.Vector3()) {
+  if (!state.selected) return out.copy(p.explode).multiplyScalar(amount);
+  if (state.selected !== p.id) return out.set(0, 0, 0);
+  return out.copy(p.popout).multiplyScalar(amount);
+}
+function targetOffset(p) {
+  return offsetFor(p, state.explodeTarget);
 }
 
 function resize() {
@@ -605,6 +674,7 @@ function resize() {
 window.addEventListener('resize', resize);
 
 const clock = new THREE.Clock();
+const tmpOffset = new THREE.Vector3();
 let compassTick = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -612,6 +682,8 @@ function frame() {
   if (state.instant) { k = 1; if (fly) fly.t = 1; }
 
   state.explode += (state.explodeTarget - state.explode) * k;
+  state.color += ((state.colorful ? 1 : 0) - state.color) * k;
+  if (Math.abs(state.color - (state.colorful ? 1 : 0)) < 0.002) state.color = state.colorful ? 1 : 0;
 
   if (fly) {
     fly.t += dt / fly.duration;
@@ -625,10 +697,8 @@ function frame() {
 
   const sel = state.selected;
   for (const p of parts) {
-    const pulled = sel === p.id && (!p.side || p.side === state.selectedSide);
-    const target = p.explode.clone().multiplyScalar(state.explode);
-    if (pulled) target.add(p.pull);
-    p.offset.lerp(target, k);
+    const pulled = sel === p.id;
+    p.offset.lerp(offsetFor(p, state.explode, tmpOffset), k);
     p.group.position.copy(p.offset);
 
     const ghostTarget = sel && sel !== p.id ? 1 : 0;
@@ -640,6 +710,7 @@ function frame() {
     const u = p.mesh.material.uniforms;
     u.uGhost.value = p.ghost;
     u.uHover.value = p.hover;
+    u.uColor.value = state.color;
     u.uPixelRatio.value = pixelRatio();
     const transparent = p.ghost > 0.001;
     if (p.mesh.material.transparent !== transparent) {
@@ -687,7 +758,7 @@ async function boot() {
     if (window.innerWidth <= 900) infoPanel.classList.add('collapsed');
     requestAnimationFrame(frame);
     $('#loader').classList.add('done');
-    window.__atlas = { state, parts, select, setExplode, setView, camera, controls, toggleHalf };
+    window.__atlas = { state, parts, select, setExplode, setView, camera, controls, toggleHalf, toggleColor };
   } catch (err) {
     console.error(err);
     loaderText.textContent = 'Sorry — this atlas needs a browser with WebGL. (' + err.message + ')';
