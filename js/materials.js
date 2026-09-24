@@ -22,9 +22,7 @@ const partVertex = /* glsl */ `
 
 const partFragment = /* glsl */ `
   uniform vec3 uInk;
-  uniform vec3 uPaper;
   uniform vec3 uTint;
-  uniform float uColor;
   uniform float uGhost;
   uniform float uHover;
   uniform float uPixelRatio;
@@ -67,25 +65,21 @@ const partFragment = /* glsl */ `
     float minor = inkLine(vE.x, 0.5 * pr) * 0.55;
     float sulci = max(major, minor) * (1.0 - cut);
 
-    // Cut surface: hatched grey-matter ribbon over plain white matter.
+    // Cut surface: hatched grey-matter ribbon over pale white matter.
     float gm = 1.0 - smoothstep(${GM_T.toFixed(2)} - 0.015, ${GM_T.toFixed(2)} + 0.015, depth);
     float boundary = inkLine(depth - ${GM_T.toFixed(2)}, 0.45 * pr) * cut * 0.8;
-    float gmInk = hatch(fc, normalize(vec2(1.0, -1.0)), 3.2, 0.9) * gm * cut * 0.55;
+    float gmInk = hatch(fc, normalize(vec2(1.0, -1.0)), 3.2, 0.9) * gm * cut * 0.28;
 
-    // Shadow hatching (single, then cross-hatch in the darkest areas).
-    float h = hatch(fc, normalize(vec2(1.0, 1.0)), 5.0, 0.9) * smoothstep(0.35, 0.75, shade) * 0.35;
-    h = max(h, hatch(fc, normalize(vec2(1.0, -1.0)), 5.0, 0.9) * smoothstep(0.8, 1.0, shade) * 0.25);
+    // Light shadow hatching (single, then cross-hatch in the darkest areas).
+    float h = hatch(fc, normalize(vec2(1.0, 1.0)), 5.0, 0.9) * smoothstep(0.35, 0.75, shade) * 0.18;
+    h = max(h, hatch(fc, normalize(vec2(1.0, -1.0)), 5.0, 0.9) * smoothstep(0.8, 1.0, shade) * 0.12);
 
-    vec3 paper = uPaper * (1.0 - 0.03 * shade);
-    // Colour mode: soft watercolour wash under the ink, darker in shadow;
-    // cortical cut faces show pinkish grey matter over pale white matter.
-    vec3 wash = mix(uTint, vec3(1.0), 0.18) * (1.0 - 0.22 * shade);
-    wash = mix(wash, mix(vec3(0.96, 0.95, 0.92), vec3(0.86, 0.72, 0.72), gm), cut);
-    paper = mix(paper, wash, uColor);
+    // Watercolour wash in the structure's colour, darker in shadow; cortical
+    // cut faces show pinkish grey matter over pale white matter.
+    vec3 paper = mix(uTint, vec3(1.0), 0.18) * (1.0 - 0.22 * shade);
+    paper = mix(paper, mix(vec3(0.96, 0.95, 0.92), vec3(0.86, 0.72, 0.72), gm), cut);
     paper = mix(paper, paper * vec3(0.9, 0.9, 0.88), uHover * 0.7);
-    // Hatching and tertiary lines are lighter over colour.
-    h *= 1.0 - 0.5 * uColor;
-    float ink = max(max(sulci * (1.0 - 0.25 * uColor), boundary), max(h * (1.0 - cut), gmInk * (1.0 - 0.5 * uColor)));
+    float ink = max(max(sulci * 0.75, boundary), max(h * (1.0 - cut), gmInk));
     vec3 col = mix(paper, uInk, ink);
 
     // Ghost mode: only a thin silhouette and faint sulci remain.
@@ -103,9 +97,7 @@ export function partMaterial() {
     fragmentShader: partFragment,
     uniforms: {
       uInk: { value: new THREE.Color(0x111111) },
-      uPaper: { value: new THREE.Color(0xffffff) },
       uTint: { value: new THREE.Color(0xffffff) },
-      uColor: { value: 0 },
       uGhost: { value: 0 },
       uHover: { value: 0 },
       uPixelRatio: { value: 1 },
@@ -144,5 +136,16 @@ export function hullMaterial() {
       uWidth: { value: 1.5 },
     },
     side: THREE.BackSide,
+  });
+}
+
+// Flat per-part ID colour, rendered into a small offscreen target to find
+// out which structures are visible (used to hide labels of occluded parts).
+export function idMaterial(index) {
+  const id = index + 1;
+  return new THREE.ShaderMaterial({
+    vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `void main() { gl_FragColor = vec4(${(id % 256) / 255}, ${Math.floor(id / 256) / 255}, 0.0, 1.0); }`,
+    side: THREE.DoubleSide,
   });
 }
