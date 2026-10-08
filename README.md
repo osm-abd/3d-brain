@@ -1,11 +1,12 @@
 # Encephalon — an interactive 3D brain atlas
 
-A browser-based atlas of human brain anatomy, drawn as ink line-art over soft atlas colours on a white background. Each structure has its own colour, and the index shows matching swatches.
+A browser-based atlas of human brain anatomy, drawn as ink line-art over soft atlas colours on a white background. Each structure has its own colour, and the structures menu shows matching swatches.
 
 - **Rotate, zoom and pan** the model (drag / scroll / right-drag, or touch gestures).
-- **Click any structure** (on the model or in the index) to select it. The rest of the brain fades to a faint outline, the camera moves to it, and the panel shows its anatomy, functions, clinical notes and blood supply. While it is selected, the slider (or the **Pop out** button) slides it out of the brain like a Lego brick; paired structures come out on both sides together.
+- The **Structures** button opens the menu of all structures (closed by default). The **info card** is a floating popup on the right; close it with × and reopen it with **Info**.
+- **Click any structure** (on the model or in the menu) to select it. The rest of the brain fades to a faint outline, the camera moves to it, and the info card shows its anatomy, functions, clinical notes and blood supply. While it is selected, the slider (or the **Pop out** button) slides it out of the brain like a Lego brick; paired structures come out on both sides together.
 - **Explode** (button, slider or <kbd>E</kbd>) pushes every part outward from the centre so you can see the internal layers: cortex → insula and cingulate → corpus callosum and ventricles → basal ganglia and thalamus → brainstem and cerebellum. Cut faces of the cortical lobes show the grey-matter ribbon (hatched) over white matter.
-- **½** (<kbd>H</kbd>) hides the left half to show the medial surface. You can hide individual structures from the index, or **Isolate** one.
+- **½** (<kbd>H</kbd>) hides the left half to show the medial surface. You can hide individual structures from the menu, or **Isolate** one.
 - Standard views: L / R lateral, A anterior, P posterior, S superior, I inferior. <kbd>Esc</kbd> deselects and <kbd>R</kbd> resets.
 
 ## Structures (27 types, 42 parts)
@@ -59,7 +60,7 @@ Structures that come in pairs are built for the right side only and mirrored in 
 ```
 index.html            page shell
 css/style.css         layout and typography
-js/main.js            scene, interaction, explode/pull-out, labels
+js/main.js            scene, interaction, explode/pull-out, panels
 js/materials.js       line-art shaders
 js/anatomy.js         anatomical reference text
 data/                 generated geometry

@@ -138,14 +138,3 @@ export function hullMaterial() {
     side: THREE.BackSide,
   });
 }
-
-// Flat per-part ID colour, rendered into a small offscreen target to find
-// out which structures are visible (used to hide labels of occluded parts).
-export function idMaterial(index) {
-  const id = index + 1;
-  return new THREE.ShaderMaterial({
-    vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `void main() { gl_FragColor = vec4(${(id % 256) / 255}, ${Math.floor(id / 256) / 255}, 0.0, 1.0); }`,
-    side: THREE.DoubleSide,
-  });
-}
