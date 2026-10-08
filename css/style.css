@@ -8,8 +8,8 @@
   --accent: #b3261e;
   --serif: 'EB Garamond', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  --panel-w: 340px;
-  --index-w: 240px;
+  --panel-w: 380px;
+  --index-w: 260px;
   --gutter: 20px;
 }
 
@@ -43,18 +43,32 @@ button { font: inherit; color: inherit; }
 .masthead h1 { margin: 0; font-weight: 500; font-size: 34px; letter-spacing: -0.01em; line-height: 1.05; }
 .subtitle { margin: 2px 0 0; font-style: italic; color: var(--ink-2); font-size: 17px; }
 
-/* ---------- panels ---------- */
+/* ---------- panels (floating cards) ---------- */
 .panel {
-  position: fixed; background: rgba(255, 255, 255, 0.94);
+  position: fixed; z-index: 3; background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--ink); border-radius: 16px;
+  box-shadow: 0 1px 0 var(--ink), 0 18px 40px -18px rgba(0, 0, 0, 0.35);
+  opacity: 0; visibility: hidden; transform: scale(0.97);
+  transition: opacity 0.2s, transform 0.2s, visibility 0s 0.2s;
 }
+.panel.open { opacity: 1; visibility: visible; transform: none; transition: opacity 0.2s, transform 0.2s; }
+.close-btn {
+  flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--rule); background: var(--paper);
+  cursor: pointer; font-size: 18px; line-height: 1; display: grid; place-items: center; padding: 0 0 2px; color: var(--ink-2);
+}
+.close-btn:hover { border-color: var(--ink); color: var(--ink); }
+
+.index-toggle { position: fixed; top: 124px; left: var(--gutter); z-index: 3; display: inline-flex; align-items: center; gap: 6px; }
+.index-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.index-toggle[aria-expanded='true'] { background: var(--ink); color: var(--paper); }
 .index {
-  top: 128px; left: var(--gutter); bottom: 96px; width: var(--index-w);
-  display: flex; flex-direction: column; border-top: 1px solid var(--ink);
+  top: 162px; left: var(--gutter); width: var(--index-w); max-height: calc(100vh - 290px);
+  display: flex; flex-direction: column; padding: 6px 12px 12px 16px; transform-origin: top left;
 }
-.index-head { padding: 10px 0 8px; }
+.index-head { display: flex; align-items: center; gap: 8px; padding: 6px 0 8px; }
 #search {
-  width: 100%; border: 0; border-bottom: 1px solid var(--rule); background: transparent;
+  flex: 1; min-width: 0; border: 0; border-bottom: 1px solid var(--rule); background: transparent;
   font: 15px var(--serif); font-style: italic; padding: 4px 0; color: var(--ink); outline: none;
 }
 #search:focus { border-bottom-color: var(--ink); }
@@ -82,12 +96,17 @@ button { font: inherit; color: inherit; }
 .item.hidden .eye { opacity: 0.8; }
 
 .info {
-  top: var(--gutter); right: var(--gutter); bottom: 96px; width: var(--panel-w);
-  overflow-y: auto; padding: 0 4px 24px 0; scrollbar-width: thin;
+  right: var(--gutter); top: calc(50% - 40px); width: var(--panel-w); max-height: 60vh;
+  overflow-y: auto; padding: 16px 20px 22px; scrollbar-width: thin;
+  transform: translateY(-50%) scale(0.97); transform-origin: right center;
 }
+.info.open { transform: translateY(-50%); }
+.info .close-btn { position: sticky; top: 0; float: right; margin: -2px -6px 0 8px; z-index: 1; }
+.info-toggle { position: fixed; top: var(--gutter); right: var(--gutter); z-index: 3; }
+.info-toggle[aria-expanded='true'] { display: none; }
 .info .kicker {
   font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3);
-  display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid var(--ink); padding-top: 8px;
+  display: flex; justify-content: space-between; gap: 8px; padding: 6px 0 8px; border-bottom: 1px solid var(--ink);
 }
 .info h2 { font-size: 30px; font-weight: 500; margin: 6px 0 0; line-height: 1.1; }
 .info .latin { font-style: italic; color: var(--ink-2); margin: 2px 0 12px; }
@@ -107,7 +126,6 @@ button { font: inherit; color: inherit; }
   font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
 }
 .chip-btn:hover { background: var(--ink); color: var(--paper); }
-.index-toggle { display: none; }
 
 /* ---------- toolbar ---------- */
 .toolbar {
@@ -145,27 +163,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   align-self: center; margin-left: -4px;
 }
 
-/* ---------- labels & tooltip ---------- */
-#labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
-.tag {
-  position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 13.5px; font-style: italic;
-  color: var(--ink); transform-origin: 0 50%; transition: opacity 0.25s;
-  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
-}
-.tag::before {
-  content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--ink);
-  margin-right: 5px; vertical-align: middle; box-shadow: 0 0 0 2px #fff;
-}
-.tag.selected { color: var(--accent); }
-.tag.selected::before { background: var(--accent); }
-#tooltip {
-  position: fixed; pointer-events: none; padding: 3px 9px; background: var(--ink); color: var(--paper);
-  font-size: 14px; border-radius: 3px; opacity: 0; transform: translate(12px, 12px); transition: opacity 0.12s; white-space: nowrap;
-}
-#tooltip.show { opacity: 1; }
-#tooltip .side { font-family: var(--mono); font-size: 10px; opacity: 0.7; margin-left: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
-
-#compass { position: fixed; left: calc(var(--index-w) + var(--gutter) + 16px); bottom: 26px; width: 74px; height: 74px; pointer-events: none; }
+/* ---------- orientation compass ---------- */
+#compass { position: fixed; left: var(--gutter); bottom: 26px; width: 74px; height: 74px; pointer-events: none; }
 #compass line { stroke-width: 1.2; }
 #compass text { font-family: var(--mono); font-size: 11px; text-anchor: middle; dominant-baseline: central; }
 
@@ -185,24 +184,22 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   :root { --gutter: 16px; }
   .masthead h1 { font-size: 26px; }
   .subtitle { font-size: 15px; }
-  .index-toggle { display: inline-block; position: fixed; top: 22px; right: var(--gutter); z-index: 3; }
+  .index-toggle { top: 22px; left: auto; right: var(--gutter); }
   .index {
-    top: 64px; right: var(--gutter); left: auto; bottom: auto; max-height: 60vh; width: min(280px, calc(100vw - 32px));
-    padding: 0 12px 10px; border: 1px solid var(--ink); z-index: 3; display: none;
+    top: 64px; right: var(--gutter); left: auto; width: min(300px, calc(100vw - 32px)); max-height: 60vh;
+    transform-origin: top right; z-index: 5;
   }
-  .index.open { display: flex; }
+  .info-toggle { right: var(--gutter); top: 62px; }
   .info {
-    top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 38vh; padding: 12px 16px 84px;
-    border-top: 1px solid var(--ink);
+    left: var(--gutter); right: var(--gutter); top: auto; bottom: 72px; width: auto; max-height: 60vh;
+    padding: 12px 16px 18px; transform: translateY(8px); transform-origin: bottom center;
   }
-  .info.collapsed { max-height: 118px; overflow: hidden; }
-  .info .kicker { border-top: 0; padding-top: 0; }
+  .info.open { transform: none; }
   .info h2 { font-size: 24px; }
   .toolbar { bottom: 12px; max-width: calc(100vw - 16px); overflow-x: auto; z-index: 4; }
   .slider input { width: 70px; }
   .views .tool { min-width: 26px; padding: 0 4px; }
-  #compass { left: auto; right: 12px; bottom: auto; top: 64px; width: 58px; height: 58px; }
-  .index.open ~ #compass { display: none; }
+  #compass { left: auto; right: 12px; bottom: auto; top: 104px; width: 58px; height: 58px; z-index: 1; }
 }
 @media (max-width: 520px) {
   .tool.primary span { display: none; }

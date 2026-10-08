@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { COLORS, GROUPS, OVERVIEW, STRUCTURES } from './anatomy.js';
-import { partMaterial, hullMaterial, idMaterial } from './materials.js';
+import { partMaterial, hullMaterial } from './materials.js';
 
 // ---------------------------------------------------------------------------
 // Scene setup
@@ -132,7 +132,6 @@ const partsById = new Map(); // structure id -> [instances]
 const pickables = [];
 
 function createInstance(id, geometry, side) {
-  const info = STRUCTURES[id];
   const material = partMaterial();
   material.uniforms.uTint.value.setStyle(COLORS[id] || '#dddddd', THREE.LinearSRGBColorSpace); // shader outputs sRGB directly
   const mesh = new THREE.Mesh(geometry, material);
@@ -145,33 +144,6 @@ function createInstance(id, geometry, side) {
   const bb = geometry.boundingBox;
   const center = bb.getCenter(new THREE.Vector3());
   const size = bb.getSize(new THREE.Vector3());
-  // Anchor labels on the vertex nearest the box centre (C-shaped parts have hollow centres).
-  const p = geometry.attributes.position;
-  const anchor = new THREE.Vector3();
-  let best = Infinity;
-  for (let i = 0; i < p.count; i += 7) {
-    const dx = p.getX(i) - center.x, dy = p.getY(i) - center.y, dz = p.getZ(i) - center.z;
-    const d = dx * dx + dy * dy + dz * dz;
-    if (d < best) { best = d; anchor.set(p.getX(i), p.getY(i), p.getZ(i)); }
-  }
-
-  // Candidate label points: the anchor plus the vertices nearest each octant
-  // centre of the bounding box, so a partly hidden part can still be labelled.
-  const samples = [anchor.clone()];
-  for (let o = 0; o < 8; o++) {
-    const oc = new THREE.Vector3(
-      center.x + size.x * ((o & 1) ? 0.25 : -0.25),
-      center.y + size.y * ((o & 2) ? 0.25 : -0.25),
-      center.z + size.z * ((o & 4) ? 0.25 : -0.25));
-    let bestD = Infinity; const v = new THREE.Vector3();
-    for (let i = 0; i < p.count; i += 5) {
-      const dx = p.getX(i) - oc.x, dy = p.getY(i) - oc.y, dz = p.getZ(i) - oc.z;
-      const d = dx * dx + dy * dy + dz * dz;
-      if (d < bestD) { bestD = d; v.set(p.getX(i), p.getY(i), p.getZ(i)); }
-    }
-    if (samples.every((q) => q.distanceToSquared(v) > 0.04)) samples.push(v);
-  }
-
   const s = side === 'left' ? -1 : 1;
   const explode = new THREE.Vector3();
   if (CORTEX.has(id)) {
@@ -197,8 +169,8 @@ function createInstance(id, geometry, side) {
   popout.setLength(Math.max(popout.length(), 3.5)).add(pull.clone().multiplyScalar(1.2));
 
   const inst = {
-    key: side ? `${id}:${side}` : id, id, side, info, mesh, hull, group, center, size, anchor, samples, labelAt: anchor.clone(), idMat: idMaterial(parts.length), explode, pull, popout,
-    offset: new THREE.Vector3(), inView: false, ghost: 0, hover: 0, visible: true, label: null,
+    key: side ? `${id}:${side}` : id, id, side, mesh, hull, group, center, size, explode, pull, popout,
+    offset: new THREE.Vector3(), ghost: 0, hover: 0, visible: true,
   };
   mesh.userData.inst = inst;
   parts.push(inst);
@@ -216,7 +188,8 @@ const state = {
   explodeTarget: 0,
   selected: null,   // structure id; both members of a pair are selected together
   hovered: null,
-  labels: true,
+  infoOpen: true,
+  indexOpen: false,
   half: false,
   hiddenIds: new Set(),
 };
@@ -227,8 +200,6 @@ const state = {
 const $ = (s) => document.querySelector(s);
 const indexList = $('#index-list');
 const infoPanel = $('#info');
-const tooltip = $('#tooltip');
-const labelsLayer = $('#labels');
 const EYE = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>';
 const EYE_OFF = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><path d="M4 4l16 16"/></svg>';
 const itemEls = new Map();
@@ -298,25 +269,32 @@ function applyVisibility() {
 // ---------------------------------------------------------------------------
 const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
+const CLOSE_BTN = '<button class="close-btn" type="button" data-act="close" aria-label="Close panel" title="Close">×</button>';
+function bindInfoClose() {
+  infoPanel.querySelector('[data-act="close"]').addEventListener('click', () => setInfoOpen(false));
+}
+
 function renderInfo() {
   const id = state.selected;
   if (!id) {
     const o = OVERVIEW;
-    infoPanel.innerHTML = `<div class="kicker"><span>Overview</span><span>${parts.length} parts</span></div>
+    infoPanel.innerHTML = `${CLOSE_BTN}<div class="kicker"><span>Overview</span><span>${parts.length} parts</span></div>
       <h2>${o.name}</h2><p class="latin">${o.latin}</p><p class="summary">${esc(o.summary)}</p>
       ${o.sections.map(([h, items]) => `<h3>${h}</h3><ul>${items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`).join('')}
       <p class="note">${esc(o.note)}</p>`;
+    bindInfoClose();
     return;
   }
   const s = STRUCTURES[id];
   const group = GROUPS.find((g) => g.id === s.group);
   const sideText = s.bilateral ? 'Left & right · paired' : 'Midline · unpaired';
-  infoPanel.innerHTML = `<div class="kicker"><span>${String(s.number).padStart(2, '0')} · ${group.name}</span><span>${sideText}</span></div>
+  infoPanel.innerHTML = `${CLOSE_BTN}<div class="kicker"><span>${String(s.number).padStart(2, '0')} · ${group.name}</span><span>${sideText}</span></div>
     <h2>${s.name}</h2><p class="latin">${esc(s.latin)}</p>
     <div class="actions"><button class="chip-btn" data-act="back" type="button">← Overview</button>
     <button class="chip-btn" data-act="isolate" type="button">${isIsolated(id) ? 'Show all' : 'Isolate'}</button></div>
     <p class="summary">${esc(s.summary)}</p>
     ${s.sections.map(([h, items]) => `<h3>${h}</h3><ul>${items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`).join('')}`;
+  bindInfoClose();
   infoPanel.querySelector('[data-act="back"]').addEventListener('click', () => select(null));
   infoPanel.querySelector('[data-act="isolate"]').addEventListener('click', () => isolate(id));
   infoPanel.scrollTop = 0;
@@ -354,7 +332,8 @@ function select(id) {
     flyTo(null, HOME.target.clone());
   }
   renderInfo();
-  infoPanel.classList.remove('collapsed');
+  if (id) setInfoOpen(true);
+  if (id && window.innerWidth <= 900) setIndexOpen(false);
 }
 
 function setHover(id, side = null) {
@@ -445,15 +424,8 @@ canvas.addEventListener('pointermove', (e) => {
   const inst = pick(e.clientX, e.clientY);
   setHover(inst?.id || null, inst?.side || null);
   canvas.classList.toggle('pointing', !!inst);
-  if (inst) {
-    const side = inst.side ? `<span class="side">${inst.side}</span>` : '';
-    tooltip.innerHTML = `${esc(inst.info.name)}${side}`;
-    tooltip.style.left = `${e.clientX}px`;
-    tooltip.style.top = `${e.clientY}px`;
-    tooltip.classList.add('show');
-  } else tooltip.classList.remove('show');
 });
-canvas.addEventListener('pointerleave', () => { tooltip.classList.remove('show'); setHover(null); });
+canvas.addEventListener('pointerleave', () => setHover(null));
 
 // ---------------------------------------------------------------------------
 // Toolbar
@@ -500,11 +472,6 @@ function toggleHalf() {
   }
 }
 halfBtn.addEventListener('click', toggleHalf);
-const labelsBtn = $('#labels-btn');
-labelsBtn.addEventListener('click', () => {
-  state.labels = !state.labels;
-  labelsBtn.setAttribute('aria-pressed', String(state.labels));
-});
 function resetAll() {
   for (const id of [...state.hiddenIds]) toggleHidden(id);
   if (state.half) toggleHalf();
@@ -512,120 +479,37 @@ function resetAll() {
   select(null);
   flyTo(homePos(), HOME.target, 1.1);
 }
+// Structures menu (left): collapsed by default, opened by its button.
+const indexPanel = $('#index');
 const indexToggle = $('#index-toggle');
-indexToggle.addEventListener('click', () => {
-  const open = !$('#index').classList.contains('open');
-  $('#index').classList.toggle('open', open);
+function setIndexOpen(open) {
+  state.indexOpen = open;
+  indexPanel.classList.toggle('open', open);
   indexToggle.setAttribute('aria-expanded', String(open));
-});
-infoPanel.addEventListener('click', (e) => {
-  if (window.innerWidth <= 900 && infoPanel.classList.contains('collapsed') && !e.target.closest('button')) infoPanel.classList.remove('collapsed');
-});
+  if (open) $('#search').focus({ preventScroll: true });
+}
+indexToggle.addEventListener('click', () => setIndexOpen(!indexPanel.classList.contains('open')));
+$('#index-close').addEventListener('click', () => setIndexOpen(false));
+
+// Info card (right): a floating popup, reopened by the Info button.
+const infoToggle = $('#info-toggle');
+function setInfoOpen(open) {
+  state.infoOpen = open;
+  infoPanel.classList.toggle('open', open);
+  infoToggle.setAttribute('aria-expanded', String(open));
+}
+infoToggle.addEventListener('click', () => setInfoOpen(!state.infoOpen));
 
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
-  if (e.key === 'Escape') select(null);
+  if (e.key === 'Escape') {
+    if (indexPanel.classList.contains('open') && window.innerWidth <= 900) setIndexOpen(false);
+    else select(null);
+  }
   else if (e.key === 'e' || e.key === 'E') setExplode(state.explodeTarget > 0.5 ? 0 : 1);
   else if (e.key === 'h' || e.key === 'H') toggleHalf();
   else if (e.key === 'r' || e.key === 'R') resetAll();
 });
-
-// ---------------------------------------------------------------------------
-// Labels
-// ---------------------------------------------------------------------------
-let labelOrder = [];
-function buildLabels() {
-  // Bigger structures claim label space first.
-  labelOrder = [...parts].sort((a, b) => b.size.length() - a.size.length());
-  for (const p of parts) {
-    const el = document.createElement('div');
-    el.className = 'tag';
-    el.textContent = p.info.name;
-    el.style.opacity = '0';
-    labelsLayer.appendChild(el);
-    p.label = el;
-  }
-}
-const tmp = new THREE.Vector3();
-const placed = [];
-function overlaps(x, y, w, h) {
-  for (const r of placed) if (x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) return true;
-  return false;
-}
-// Label visibility: every so often (only while labels are on screen) the
-// scene is rendered at low resolution with a flat ID colour per part. A label
-// is shown only if one of its sample points lands on a pixel of its own part,
-// and it is placed on that point.
-const idTarget = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: true });
-let idPixels = new Uint8Array(4);
-let lastIdPass = -Infinity;
-const idProj = new THREE.Vector3();
-function updateVisibility(now) {
-  if (now - lastIdPass < 150) return;
-  lastIdPass = now;
-  const w = Math.max(64, Math.round(resolution.x / pixelRatio() / 4));
-  const h = Math.max(64, Math.round(resolution.y / pixelRatio() / 4));
-  if (idTarget.width !== w || idTarget.height !== h) { idTarget.setSize(w, h); idPixels = new Uint8Array(w * h * 4); }
-
-  const saved = parts.map((p) => [p.mesh.material, p.mesh.visible, p.hull.visible]);
-  for (const p of parts) {
-    p.mesh.material = p.idMat;
-    p.mesh.visible = p.ghost < 0.5; // ghosted parts are see-through
-    p.hull.visible = false;
-  }
-  renderer.setClearColor(0x000000, 1);
-  renderer.setRenderTarget(idTarget);
-  renderer.render(scene, camera);
-  renderer.readRenderTargetPixels(idTarget, 0, 0, w, h, idPixels);
-  renderer.setRenderTarget(null);
-  renderer.setClearColor(0xffffff, 1);
-  parts.forEach((p, i) => { [p.mesh.material, p.mesh.visible, p.hull.visible] = saved[i]; });
-
-  parts.forEach((p, i) => {
-    p.inView = false;
-    if (!p.visible) return;
-    for (const sample of p.samples) {
-      idProj.copy(sample).add(p.offset).project(camera);
-      if (idProj.z > 1) continue;
-      const x = Math.floor((idProj.x * 0.5 + 0.5) * w), y = Math.floor((idProj.y * 0.5 + 0.5) * h);
-      if (x < 0 || y < 0 || x >= w || y >= h) continue;
-      const o = (y * w + x) * 4;
-      if (idPixels[o] + idPixels[o + 1] * 256 === i + 1) { p.inView = true; p.labelAt.copy(sample); break; }
-    }
-  });
-}
-
-function updateLabels(now) {
-  placed.length = 0;
-  const w = resolution.x / pixelRatio(), h = resolution.y / pixelRatio();
-  const showAll = state.labels && state.explode > 0.55;
-  if (state.labels && (showAll || state.selected)) updateVisibility(now);
-  for (const p of labelOrder) {
-    const isSel = state.selected === p.id;
-    let show = p.visible && state.labels && (isSel || (showAll && !state.selected));
-    if (show && !isSel && p.side && !state.half) {
-      // Only label the member of a pair that faces the camera.
-      const twin = partsById.get(p.id).find((q) => q !== p);
-      if (twin && twin.visible) {
-        const dp = camera.position.distanceToSquared(tmp.copy(p.anchor).add(p.offset));
-        const dq = camera.position.distanceToSquared(tmp.copy(twin.anchor).add(twin.offset));
-        if (dp > dq) show = false;
-      }
-    }
-    // Hide labels of structures hidden behind others (seen from this angle).
-    if (show && !p.inView) show = false;
-    if (!show) { if (p.label.style.opacity !== '0') p.label.style.opacity = '0'; continue; }
-    tmp.copy(p.labelAt).add(p.offset).project(camera);
-    if (tmp.z > 1) { p.label.style.opacity = '0'; continue; }
-    const x = (tmp.x * 0.5 + 0.5) * w, y = (-tmp.y * 0.5 + 0.5) * h;
-    if (!p.labelW) p.labelW = p.label.offsetWidth + 6;
-    if (!isSel && overlaps(x - 4, y - 16, p.labelW, 17)) { p.label.style.opacity = '0'; continue; }
-    placed.push({ x: x - 4, y: y - 16, w: p.labelW, h: 17 });
-    p.label.style.transform = `translate(${x.toFixed(1)}px, ${(y - 8).toFixed(1)}px)`;
-    p.label.style.opacity = '1';
-    p.label.classList.toggle('selected', state.selected === p.id);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Orientation compass
@@ -673,13 +557,32 @@ function resize() {
   renderer.setSize(w, h, false);
   renderer.getDrawingBufferSize(resolution);
   camera.aspect = w / h;
-  // Keep the brain clear of the side panels on wide screens.
-  const shift = w > 900 ? ((240 - 340) / 2) : 0;
-  camera.setViewOffset(w, h, -shift, w > 900 ? 0 : h * 0.06, w, h);
-  camera.updateProjectionMatrix();
+  applyViewOffset();
   for (const p of parts) p.hull.material.uniforms.uResolution.value.copy(resolution);
 }
 window.addEventListener('resize', resize);
+
+// Shift the projection so the brain stays centred in the space the info card
+// and the structures menu leave free (beside them on wide screens, above the card on narrow ones).
+const viewShift = { x: 0, y: 0 };
+function viewShiftTarget() {
+  const w = window.innerWidth, h = window.innerHeight;
+  if (w > 900) return { x: (state.infoOpen ? 210 : 0) - (state.indexOpen ? 145 : 0), y: 0 };
+  return { x: 0, y: state.infoOpen ? h * 0.27 : h * 0.03 };
+}
+function applyViewOffset() {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.setViewOffset(w, h, viewShift.x, viewShift.y, w, h);
+  camera.updateProjectionMatrix();
+}
+function updateViewShift(k) {
+  const t = viewShiftTarget();
+  const dx = t.x - viewShift.x, dy = t.y - viewShift.y;
+  if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+  viewShift.x += dx * k;
+  viewShift.y += dy * k;
+  applyViewOffset();
+}
 
 const clock = new THREE.Clock();
 const tmpOffset = new THREE.Vector3();
@@ -700,6 +603,7 @@ function frame() {
     if (t >= 1) fly = null;
   }
   controls.update();
+  updateViewShift(k);
 
   const sel = state.selected;
   for (const p of parts) {
@@ -729,7 +633,6 @@ function frame() {
   }
 
   renderer.render(scene, camera);
-  updateLabels(performance.now());
   if (++compassTick % 2 === 0) updateCompass();
   requestAnimationFrame(frame);
 }
@@ -756,11 +659,12 @@ async function boot() {
       }
     }
     buildIndex();
-    buildLabels();
     renderInfo();
+    // On phones the info card starts closed so the brain is unobstructed.
+    if (window.innerWidth <= 900) setInfoOpen(false);
+    Object.assign(viewShift, viewShiftTarget());
     resize();
     camera.position.copy(homePos());
-    if (window.innerWidth <= 900) infoPanel.classList.add('collapsed');
     requestAnimationFrame(frame);
     $('#loader').classList.add('done');
     window.__atlas = { state, parts, select, setExplode, setView, camera, controls, toggleHalf };
